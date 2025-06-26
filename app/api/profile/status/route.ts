@@ -1,53 +1,40 @@
 // app/api/profile/status/route.ts
-// Change the import:
-// import pool from '@/lib/db'; // Remove this
-import { getDbPool } from '@/lib/db'; // Import the function to get the pool
-import { clerkClient, getAuth } from '@clerk/nextjs/server';
-import { NextRequest, NextResponse } from 'next/server';
-import { RowDataPacket } from 'mysql2';
+import supabaseAdmin from '@/lib/supabaseClient'
+import { getAuth } from '@clerk/nextjs/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
-    console.log('[API Profile Status] Received GET request.');
-    const authResult = getAuth(req);
+  console.log('[API Profile Status] Received GET request.')
+  const { userId } = getAuth(req)
 
-    if (!authResult.userId) {
-        console.log('[API Profile Status] Unauthorized: No userId found.');
-        return NextResponse.json({ error: 'Unauthorized - Invalid session or token' }, { status: 401 });
+  if (!userId) {
+    console.log('[API Profile Status] Unauthorized: No userId found.')
+    return NextResponse.json({ error: 'Unauthorized - Invalid session or token' }, { status: 401 })
+  }
+
+  console.log(`[API Profile Status] Authorized for userId: ${userId}`)
+
+  try {
+    // Use the Supabase client to check for the user's profile
+    const { data, error } = await supabaseAdmin
+      .from('career_forms')
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle() // This is an efficient way to get one or null, without throwing an error if not found.
+
+    // Handle any actual database errors
+    if (error) {
+      console.error('[API Profile Status] Supabase error:', error)
+      throw error
     }
 
-    const userId = authResult.userId;
-    console.log(`[API Profile Status] Authorized for userId: ${userId}`);
+    // If data is not null, the profile exists.
+    const exists = !!data
+    console.log(`[API Profile Status] Profile exists check result for user ${userId}: ${exists}`)
 
-    let connection;
-    try {
-        const pool = getDbPool(); // Get the initialized pool instance
-        const sql = "SELECT user_id FROM career_forms WHERE user_id = ? LIMIT 1";
-
-        console.log("[API Profile Status] Attempting to get connection...");
-        connection = await pool.getConnection(); // Now this should work
-        console.log("[API Profile Status] DB Connection acquired.");
-
-        console.log("[API Profile Status] Executing query...");
-        const [rows] = await connection.execute<RowDataPacket[]>(sql, [userId]);
-        console.log("[API Profile Status] Query executed.");
-
-        const exists = rows.length > 0;
-        console.log(`[API Profile Status] Profile exists check result for user ${userId}: ${exists}`);
-        return NextResponse.json({ exists });
-
-    } catch (error: any) {
-        console.error('[API Profile Status] Error checking profile status:', error);
-        // Log if the error is related to getConnection itself
-        if (error.message.includes('getConnection')) {
-             console.error('[API Profile Status] Error specifically during getConnection() call.');
-        }
-        return NextResponse.json({ error: 'Failed to check profile status in database.', details: error.message }, { status: 500 });
-    } finally {
-         if (connection) {
-            console.log("[API Profile Status] Releasing DB connection.");
-            connection.release();
-         } else {
-             console.log("[API Profile Status] No DB connection to release.");
-         }
-    }
+    return NextResponse.json({ exists })
+  } catch (error: any) {
+    console.error('[API Profile Status] Error checking profile status:', error)
+    return NextResponse.json({ error: 'Failed to check profile status in database.', details: error.message }, { status: 500 })
+  }
 }
